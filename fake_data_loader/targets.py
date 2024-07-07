@@ -474,3 +474,46 @@ class S3Target(Target):
         self.resource.objects.all().delete()
         self.resource.object_versions.all().delete()
         logger.info(f"Emptied bucket: {self.bucket_name}")
+
+
+class FirehoseTarget(Target):
+    """Firehose target."""
+    def __init__(self, credentials: dict) -> None:
+        """Connect to firehose."""
+        self.stream_name = credentials["STREAM_NAME"]
+        self.firehose_target_bucket_name = credentials["FIREHOSE_TARGET_BUCKET_NAME"]  # noqa: E501
+        try:
+            session = boto3.Session(
+                aws_access_key_id=credentials["AWS_ACCESS_KEY_ID"],
+                aws_secret_access_key=credentials["AWS_SECRET_ACCESS_KEY"],
+                region_name=credentials["AWS_REGION"]
+            )
+            self.firehose_client = session.client("firehose")
+            self.s3_client = session.client("s3")
+            self.s3_resource = session.resource("s3").Bucket(self.firehose_target_bucket_name)  # noqa: E501
+            logger.info("Firehose client created.")
+        except (NoCredentialsError, PartialCredentialsError) as err:
+            logger.error(err)
+
+    def write_event(self, payload: dict) -> None:
+        """Write a record to Firehose."""
+        data = json.dumps(payload) + "\n"
+
+        try:
+            response = self.firehose_client.put_record(
+                DeliveryStreamName=self.stream_name,
+                Record={
+                    'Data': data.encode("utf-8")
+                }
+            )
+            print(f"Record sent to Firehose: {response}")
+        except (NoCredentialsError, PartialCredentialsError):
+            print("Error: AWS credentials not found.")
+        except Exception as e:
+            print(f"Error sending record to Firehose: {e}")
+
+    def empty_bucket(self) -> None:
+        """Empty S3 bucket."""
+        self.s3_resource.objects.all().delete()
+        self.s3_resource.object_versions.all().delete()
+        logger.info(f"Emptied bucket: {self.firehose_target_bucket_name}")
